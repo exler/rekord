@@ -11,6 +11,7 @@ A Go TUI application for real-time meeting transcription using local speech-to-t
 - Save transcripts to text files
 - Beautiful TUI interface built with Bubble Tea
 
+![Screenshot](docs/screenshot.png)
 
 ## Requirements
 
