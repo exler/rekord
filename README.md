@@ -58,15 +58,23 @@ For more context regarding model selection, see the [whisper.cpp model files ins
 ## Installation
 
 ```bash
+# Install via Go
+go install github.com/exler/rekord/cmd/rekord@latest
+```
+
+Download a prebuilt binary from GitHub Releases:
+
+https://github.com/exler/rekord/releases
+
+Or build from source:
+
+```bash
 # Clone the repository
 git clone https://github.com/exler/rekord
 cd rekord
 
 # Build
 go build -o rekord ./cmd/rekord
-
-# Or install globally
-go install ./cmd/rekord
 ```
 
 ## Usage
