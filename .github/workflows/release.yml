@@ -1,0 +1,36 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+
+permissions:
+    contents: write
+
+jobs:
+    build-release:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Setup Go
+              uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.mod
+
+            - name: Build linux binary
+              env:
+                  GOOS: linux
+                  GOARCH: amd64
+                  CGO_ENABLED: 0
+              run: go build -o rekord ./cmd/rekord
+
+            - name: Package archive
+              run: tar -czf rekord-linux-amd64.tar.gz rekord
+
+            - name: Create release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: rekord-linux-amd64.tar.gz

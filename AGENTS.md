@@ -7,6 +7,7 @@ Rekord is a Go TUI app for real-time meeting transcription. It captures system a
 - Transcription is handled by `internal/transcriber`, which buffers samples and invokes the whisper CLI to produce segments.
 - The TUI is in `internal/ui` using Bubble Tea, receiving messages for new segments, audio levels, and errors.
 - Logs are managed via `internal/logging`.
+- GitHub Actions release workflow builds a linux amd64 binary.
 
 ## Project Structure
 - `cmd/rekord/`: Application entrypoint.
