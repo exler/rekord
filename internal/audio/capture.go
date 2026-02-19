@@ -1,4 +1,7 @@
-// Package audio provides system audio capture functionality using PulseAudio/PipeWire
+// Package audio provides system audio capture functionality.
+// On Linux it uses PulseAudio/PipeWire (parec/pactl).
+// On macOS it uses ffmpeg with AVFoundation; system audio capture requires
+// a virtual loopback driver such as BlackHole (https://github.com/ExistentialAudio/BlackHole).
 package audio
 
 import (
@@ -7,7 +10,6 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
-	"strings"
 	"sync"
 )
 
@@ -38,96 +40,12 @@ type MultiCapture struct {
 // Capture handles audio capture from system audio (single source, kept for compatibility)
 type Capture = MultiCapture
 
-// MonitorSource represents a PulseAudio/PipeWire monitor source
+// MonitorSource represents an audio source available for capture
 type MonitorSource struct {
 	Name        string
 	Description string
 	IsMonitor   bool
 	IsInput     bool
-}
-
-// ListMonitorSources returns available monitor sources for capturing system audio
-func ListMonitorSources() ([]MonitorSource, error) {
-	// Use pactl to list sources and find monitors
-	cmd := exec.Command("pactl", "list", "sources", "short")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list PulseAudio sources: %w", err)
-	}
-
-	var sources []MonitorSource
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			name := fields[1]
-			isMonitor := strings.Contains(name, ".monitor")
-			// Input sources typically contain "input" or don't have ".monitor"
-			isInput := !isMonitor && (strings.Contains(name, "input") ||
-				strings.Contains(name, "mic") ||
-				strings.Contains(name, "Mic") ||
-				strings.Contains(name, "capture"))
-			sources = append(sources, MonitorSource{
-				Name:        name,
-				Description: name,
-				IsMonitor:   isMonitor,
-				IsInput:     isInput || !isMonitor, // Non-monitors are typically inputs
-			})
-		}
-	}
-
-	return sources, nil
-}
-
-// GetDefaultMonitorSource returns the default output monitor source
-func GetDefaultMonitorSource() (string, error) {
-	// Get default sink and append .monitor
-	cmd := exec.Command("pactl", "get-default-sink")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get default sink: %w", err)
-	}
-
-	sink := strings.TrimSpace(string(output))
-	if sink == "" {
-		return "", errors.New("no default sink found")
-	}
-
-	return sink + ".monitor", nil
-}
-
-// GetDefaultInputSource returns the default input (microphone) source
-func GetDefaultInputSource() (string, error) {
-	cmd := exec.Command("pactl", "get-default-source")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get default source: %w", err)
-	}
-
-	source := strings.TrimSpace(string(output))
-	if source == "" {
-		return "", errors.New("no default source found")
-	}
-
-	// Don't return if it's a monitor (we want actual input)
-	if strings.Contains(source, ".monitor") {
-		// Try to find an actual input source
-		sources, err := ListMonitorSources()
-		if err != nil {
-			return "", err
-		}
-		for _, s := range sources {
-			if s.IsInput && !s.IsMonitor {
-				return s.Name, nil
-			}
-		}
-		return "", errors.New("no input source found")
-	}
-
-	return source, nil
 }
 
 // NewCapture creates a new audio capture instance with a single device
@@ -179,70 +97,40 @@ func (c *MultiCapture) Start() error {
 	return nil
 }
 
-// startSource starts a single audio source
-func (c *MultiCapture) startSource(source *Source) error {
-	// Create a new stop channel
-	source.stopCh = make(chan struct{})
-
-	// Use parec for PulseAudio/PipeWire capture
-	ctx, cancel := context.WithCancel(context.Background())
-	source.cancel = cancel
-
-	source.cmd = exec.CommandContext(ctx, "parec",
-		"--format=float32le",
-		"--rate=16000",
-		"--channels=1",
-		"-d", source.deviceName,
-	)
-
-	stdout, err := source.cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	if err := source.cmd.Start(); err != nil {
-		cancel()
-		return fmt.Errorf("failed to start parec: %w", err)
-	}
-
-	// Start reading audio in a goroutine
-	source.wg.Add(1)
-	go func() {
-		defer source.wg.Done()
-
-		buffer := make([]byte, FrameSize*4) // 4 bytes per float32
-		samples := make([]float32, FrameSize)
-
-		for {
-			select {
-			case <-source.stopCh:
-				return
-			default:
-				n, err := stdout.Read(buffer)
-				if err != nil {
-					return
-				}
-
-				// Convert bytes to float32
-				numSamples := n / 4
-				for i := 0; i < numSamples; i++ {
-					samples[i] = bytesToFloat32(buffer[i*4 : (i+1)*4])
-				}
-
-				if c.onAudio != nil {
-					c.onAudio(samples[:numSamples])
-				}
-			}
-		}
-	}()
-
-	return nil
-}
-
 func bytesToFloat32(b []byte) float32 {
 	bits := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 	return math.Float32frombits(bits)
+}
+
+// readAudioLoop reads raw float32-LE samples from a ReadCloser and calls onAudio.
+// It is shared by all platform implementations.
+func (c *MultiCapture) readAudioLoop(source *Source, stdout interface{ Read([]byte) (int, error) }) {
+	defer source.wg.Done()
+
+	buffer := make([]byte, FrameSize*4) // 4 bytes per float32
+	samples := make([]float32, FrameSize)
+
+	for {
+		select {
+		case <-source.stopCh:
+			return
+		default:
+			n, err := stdout.Read(buffer)
+			if err != nil {
+				return
+			}
+
+			// Convert bytes to float32
+			numSamples := n / 4
+			for i := 0; i < numSamples; i++ {
+				samples[i] = bytesToFloat32(buffer[i*4 : (i+1)*4])
+			}
+
+			if c.onAudio != nil {
+				c.onAudio(samples[:numSamples])
+			}
+		}
+	}
 }
 
 // stopAllSources stops all audio sources
@@ -262,7 +150,7 @@ func (c *MultiCapture) stopSource(source *Source) {
 		close(source.stopCh)
 	}
 
-	// Cancel the context to kill parec
+	// Cancel the context to kill the capture process
 	if source.cancel != nil {
 		source.cancel()
 	}
@@ -310,4 +198,9 @@ func (c *MultiCapture) GetDeviceNames() []string {
 		names[i] = s.deviceName
 	}
 	return names
+}
+
+// mustContext is a helper used by platform startSource implementations.
+func mustContext() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }
