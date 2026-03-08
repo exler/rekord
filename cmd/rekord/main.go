@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/exler/rekord/internal/audio"
 	"github.com/exler/rekord/internal/logging"
@@ -160,7 +160,7 @@ func main() {
 	app.model.SetCallbacks(app.startRecording, app.stopRecording, app.saveTranscript)
 
 	// Create and run program
-	app.program = tea.NewProgram(app.model, tea.WithAltScreen())
+	app.program = tea.NewProgram(app.model)
 
 	logging.Info("Starting TUI")
 	if _, err := app.program.Run(); err != nil {

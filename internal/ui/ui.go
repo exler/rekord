@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/exler/rekord/internal/transcriber"
 )
@@ -180,7 +180,7 @@ func New(modelPath, deviceName string) Model {
 	h := help.New()
 	h.ShowAll = false
 
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.Style = transcriptStyle
 
 	return Model{
@@ -203,7 +203,7 @@ func (m *Model) SetCallbacks(onStart, onStop func() error, onSave func(string) e
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, tea.EnterAltScreen)
+	return m.spinner.Tick
 }
 
 // Update handles messages
@@ -214,11 +214,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width - 4
-		m.viewport.Height = msg.Height - 10
-		m.help.Width = msg.Width
+		m.viewport.SetWidth(msg.Width - 4)
+		m.viewport.SetHeight(msg.Height - 10)
+		m.help.SetWidth(msg.Width)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			if m.isRecording && m.onStop != nil {
@@ -301,9 +301,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the UI
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		return v
 	}
 
 	var b strings.Builder
@@ -348,7 +350,9 @@ func (m Model) View() string {
 	// Help
 	b.WriteString(helpStyle.Render(m.help.View(m.keys)))
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 // renderTranscript renders all transcript segments

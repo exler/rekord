@@ -39,7 +39,7 @@ cd whisper.cpp
 make
 
 # Install the binary
-sudo cp build/bin/main /usr/local/bin/whisper
+sudo cp build/bin/whisper-cli /usr/local/bin/whisper
 ```
 
 ### Download a Model
